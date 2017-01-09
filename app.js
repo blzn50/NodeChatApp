@@ -6,8 +6,9 @@ var logger = require('morgan');
 var cookieParser = require('cookie-parser');
 var bodyParser = require('body-parser');
 
-var mongoose = require('mongoose');
-var Schema = mongoose.Schema;
+
+var mongo = require('mongodb').MongoClient;
+var dbURI = 'mongodb://localhost/chatDB';
 
 var index = require('./routes/index');
 var users = require('./routes/users');
@@ -32,42 +33,50 @@ app.use('/users', users);
 var serve = http.createServer(app);
 var io = require('socket.io')(serve);
 
-serve.listen(app.get('port'), function () {
-	console.log('Express sever listening on port ' + app.get('port'));
+serve.listen(3000, function () {
+	console.log('Express sever listening on port ' + 3000);
 });
 
 /* User joining and leaving */
-io.on('connection', function () {
+io.on('connection', function (socket) {
 	console.log('a user connected');
+	
+	/* Last few msgs to new users to see */
+	mongo.connect(dbURI, function(err, db) {
+		if(err){
+			console.warn(err.message);
+		} else {
+			var collection = db.collection('msgs');
+			var stream = collection.find().sort().limit(6).stream();
+			stream.on('data', function(chat) { 
+				console.log('emiting chat');
+				socket.emit('chat', chat.content);
+			});												 
+		}
+	});
+		
 	socket.on('disconnect', function () {
 		console.log('user disconnected');
 	});
 	
 	/* Broadcasting msg to chat room */
-	socket.on('chat', function () {
+	socket.on('chat', function (msg) {
+		mongo.connect(dbURI, function(err, db) {
+			if (err) {
+				console.warn(err.message);
+			} else {
+				var collection = db.collection('msgs');
+				collection.insert({ content: msg }, function(err, o) {
+					if (err) { console.warn(err.message); }
+					else { console.log("chat message inserted into db: " + msg); }
+				});
+			}
+		});
 		socket.broadcast.emit('chat', msg);
 	});
 });
 
-/* Messages saved to Mongoose db */
-var dbURI = 'mongodb://localhost/comparonics';
 
-var msgs = mongoose.model('Msgs', new Schema({ content: String }), 'msgs');
-
-mongoose.connect(dbURI, function(err, db) {
-	var collection = msgs;
-	collection.insert({ content: msg }, function(err, o) {
-		if(err) { console.warn(err.message); }
-		else { console.log("chat message inserted into db: " + msg); }
-	});
-});
-
-/* Last few msgs to new users to see */
-mongoose.connect(dbURI, function(err, db) {
-	var collection = msgs;
-	var stream = collection.find().sort({ _id: -1}).limit(6).stream();
-	stream.on('data', function(chat) { socket.emit('chat', chat.content); });
-});
 
 // catch 404 and forward to error handler
 app.use(function(req, res, next) {
